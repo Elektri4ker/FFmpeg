@@ -1,49 +1,21 @@
-FFmpeg README
-=============
+Модификация мультиплексора FFMPEG-dash, позволяющая возобновить запись потока с камеры (или любого другого live-stream'а) и упаковку его в контейнер dash.
 
-FFmpeg is a collection of libraries and tools to process multimedia content
-such as audio, video, subtitles and related metadata.
+Модификация исправляет timestamp'ы потока таким образом, как будто он не прерывался
 
-## Libraries
+Для функционирования требуется файл start_time, в котором хранится время, в которое поток стартовал.
+Во время функционирования данная модификация создает в каталоге с чанками файл timefile, в который пишет информацию, необходимую для возобновления мультиплексирования.
+При отсутствии двух вышеуказанных файлов модификация работает как обычный ffmpeg(т.е., не правит никакие timestamp'ы.
 
-* `libavcodec` provides implementation of a wider range of codecs.
-* `libavformat` implements streaming protocols, container formats and basic I/O access.
-* `libavutil` includes hashers, decompressors and miscellaneous utility functions.
-* `libavfilter` provides a mean to alter decoded Audio and Video through chain of filters.
-* `libavdevice` provides an abstraction to access capture and playback devices.
-* `libswresample` implements audio mixing and resampling routines.
-* `libswscale` implements color conversion and scaling routines.
+Пример использования:
 
-## Tools
+1. Создать файл start time:
+   date +%s >start_time
 
-* [ffmpeg](https://ffmpeg.org/ffmpeg.html) is a command line toolbox to
-  manipulate, convert and stream multimedia content.
-* [ffplay](https://ffmpeg.org/ffplay.html) is a minimalistic multimedia player.
-* [ffprobe](https://ffmpeg.org/ffprobe.html) is a simple analysis tool to inspect
-  multimedia content.
-* [ffserver](https://ffmpeg.org/ffserver.html) is a multimedia streaming server
-  for live broadcasts.
-* Additional small tools such as `aviocat`, `ismindex` and `qt-faststart`.
+2. Убедиться, что в каталоге, куда будет писаться поток, отсутствует файл timefile:
+   rm timefile
 
-## Documentation
+3. Стартовать запись
+   ffmpeg -i http://127.0.0.1:8080 -f dash \
+  -an -flags +global_header out.mpd
 
-The offline documentation is available in the **doc/** directory.
-
-The online documentation is available in the main [website](https://ffmpeg.org)
-and in the [wiki](https://trac.ffmpeg.org).
-
-### Examples
-
-Coding examples are available in the **doc/examples** directory.
-
-## License
-
-FFmpeg codebase is mainly LGPL-licensed with optional components licensed under
-GPL. Please refer to the LICENSE file for detailed information.
-
-## Contributing
-
-Patches should be submitted to the ffmpeg-devel mailing list using
-`git format-patch` or `git send-email`. Github pull requests should be
-avoided because they are not part of our review process. Few developers
-follow pull requests so they will likely be ignored.
+4. Если процесс ffmpeg'а был внезапно прерван, повторить команду из п. 3. Модицикация кодека будет ориентироваться на файлы start_time и timefile чтобы правильно ставить timestamp'ы.

@@ -88,7 +88,7 @@ static int read_timefile (char *dir, int64_t *start_pts, int *seq_num, AVRationa
         av_log (0, AV_LOG_WARNING, "Trying to continue dash stream: but end_pts of previous segment > current start pts!\n");
         goto fail;
     }   
-    *start_pts = _start_pts; fprintf(stderr, "start_pts %f s", (float)_start_pts/1000000);
+    *start_pts = _start_pts; //fprintf(stderr, "start_pts %f s", (float)_start_pts/1000000);
     *seq_num = calc_seq_num;
     
     fclose(f);
@@ -996,7 +996,7 @@ static int dash_write_packet(AVFormatContext *s, AVPacket *pkt)
     if (os->first_pts == AV_NOPTS_VALUE)
         os->first_pts = pkt->pts;
 
-    fprintf(stderr, "first pts = %f s, pts = %f s \n", (double)os->first_pts/st->time_base.den, (double)pkt->pts/st->time_base.den);
+    //fprintf(stderr, "first pts = %f s, pts = %f s \n", (double)os->first_pts/st->time_base.den, (double)pkt->pts/st->time_base.den);
 
     if ((!c->has_video || st->codec->codec_type == AVMEDIA_TYPE_VIDEO) &&
         pkt->flags & AV_PKT_FLAG_KEY && os->packets_written &&
