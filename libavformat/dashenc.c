@@ -40,6 +40,67 @@
 #include "os_support.h"
 #include "url.h"
 
+//==================================
+
+static int segment_start_index; //Вот эту вот херню лучше куда-нить перенести в структуру
+
+static void write_timefile (char *dir, int64_t end_pts, int seq_num) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%stimefile", dir);
+    FILE *f = fopen (path, "w");
+    time_t tm = time(NULL);
+    
+    fprintf(f, "%ld\n%lld\n%d", tm, end_pts, seq_num);
+    fclose(f);
+}
+
+static int read_timefile (char *dir, int64_t *start_pts, int *seq_num, AVRational time_base, int min_duration) {
+    char path[1024], start_time_path[1024];
+    snprintf(path, sizeof(path), "%stimefile", dir);
+    snprintf(start_time_path, sizeof(path), "%sstart_time", dir);
+    FILE *f = fopen (path, "r");
+    FILE *sf = fopen (start_time_path, "r");
+    //Если таких файлов нет, значит и ffmpeg внезапно не останавливался
+    //или вообще мы пишем не туда.
+    //Посему ничего в этом случае мы не делаем
+    if (!f || !sf)
+        goto fail;
+    int64_t _end_pts;
+    int _seq_num;
+    time_t saved_time;
+    //Читаем файлы, если что-то в них не так, то не делаем ничего
+    if (fscanf(f, "%ld\n%lld\n%d", &saved_time, &_end_pts, &_seq_num) != 3)
+        goto fail;
+    time_t start_time;
+    if (fscanf(sf, "%ld", &start_time)!=1)
+        goto fail;
+    time_t curr_time = time(NULL);
+    int calc_seq_num = round((float)(curr_time - start_time)/(min_duration/1000000));
+    if (calc_seq_num <= _seq_num)
+        calc_seq_num = _seq_num + 1;
+    int64_t _start_pts = (int64_t)min_duration * (calc_seq_num-1);
+    
+    if (saved_time > curr_time) {
+        av_log (0, AV_LOG_WARNING, "Trying to continue dash stream: but saved time > current time!\n");
+        goto fail;
+    }
+    if (_end_pts > _start_pts/1000000*time_base.den) {
+        av_log (0, AV_LOG_WARNING, "Trying to continue dash stream: but end_pts of previous segment > current start pts!\n");
+        goto fail;
+    }   
+    *start_pts = _start_pts; fprintf(stderr, "start_pts %f s", (float)_start_pts/1000000);
+    *seq_num = calc_seq_num;
+    
+    fclose(f);
+    fclose(sf);
+    return 0;
+fail:
+    fclose(f);
+    fclose(sf);
+    return -1;   
+}
+//==================================
+
 // See ISO/IEC 23009-1:2014 5.3.9.4.4
 typedef enum {
     DASH_TMPL_ID_UNDEFINED = -1,
@@ -690,12 +751,23 @@ static int dash_write_header(AVFormatContext *s)
         os->max_pts = AV_NOPTS_VALUE;
         os->last_dts = AV_NOPTS_VALUE;
         os->segment_index = 1;
+        
+            
+        //==========================================
+        if (read_timefile(c->dirname, &(s->output_ts_offset), &(os->segment_index),
+                s->streams[i]->time_base,
+                c->min_seg_duration)==0) {
+            
+        }
+        segment_start_index = os->segment_index;
+        //==========================================
     }
 
     if (!c->has_video && c->min_seg_duration <= 0) {
         av_log(s, AV_LOG_WARNING, "no video stream and no min seg duration set\n");
         ret = AVERROR(EINVAL);
     }
+
     ret = write_manifest(s, 0);
     if (!ret)
         av_log(s, AV_LOG_VERBOSE, "Manifest written to: %s\n", s->filename);
@@ -859,6 +931,9 @@ static int dash_flush(AVFormatContext *s, int final, int stream)
             if (ret < 0)
                 break;
         }
+        //==================================
+        write_timefile(c->dirname, os->max_pts, os->segment_index);
+        //==================================
         add_segment(os, filename, os->start_pts, os->max_pts - os->start_pts, start_pos, range_length, index_length);
         av_log(s, AV_LOG_VERBOSE, "Representation %d media segment %d written to: %s\n", i, os->segment_index, full_path);
     }
@@ -893,7 +968,7 @@ static int dash_write_packet(AVFormatContext *s, AVPacket *pkt)
     DASHContext *c = s->priv_data;
     AVStream *st = s->streams[pkt->stream_index];
     OutputStream *os = &c->streams[pkt->stream_index];
-    int64_t seg_end_duration = (os->segment_index) * (int64_t) c->min_seg_duration;
+    int64_t seg_end_duration = (os->segment_index-segment_start_index+1) * (int64_t) c->min_seg_duration; //
     int ret;
 
     ret = update_stream_extradata(s, os, st->codec);
@@ -920,6 +995,8 @@ static int dash_write_packet(AVFormatContext *s, AVPacket *pkt)
 
     if (os->first_pts == AV_NOPTS_VALUE)
         os->first_pts = pkt->pts;
+
+    fprintf(stderr, "first pts = %f s, pts = %f s \n", (double)os->first_pts/st->time_base.den, (double)pkt->pts/st->time_base.den);
 
     if ((!c->has_video || st->codec->codec_type == AVMEDIA_TYPE_VIDEO) &&
         pkt->flags & AV_PKT_FLAG_KEY && os->packets_written &&
