@@ -98,6 +98,7 @@ typedef struct DASHContext {
     const char *media_seg_name;
     AVRational min_frame_rate, max_frame_rate;
     int ambiguous_frame_rate;
+    int frag_discont;
 } DASHContext;
 
 static int dash_write(void *opaque, uint8_t *buf, int buf_size)
@@ -655,7 +656,11 @@ static int dash_write_header(AVFormatContext *s)
             goto fail;
         os->init_start_pos = 0;
 
-        av_dict_set(&opts, "movflags", "frag_custom+dash+delay_moov", 0);
+        char s_mov_flags[1024];
+        strcpy(s_mov_flags, "frag_custom+dash+delay_moov");
+        if (c->frag_discont)
+            strcat(s_mov_flags, "+frag_discont");
+        av_dict_set(&opts, "movflags", s_mov_flags, 0);
         if ((ret = avformat_write_header(ctx, &opts)) < 0) {
              goto fail;
         }
@@ -1010,6 +1015,7 @@ static const AVOption options[] = {
     { "single_file_name", "DASH-templated name to be used for baseURL. Implies storing all segments in one file, accessed using byte ranges", OFFSET(single_file_name), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, E },
     { "init_seg_name", "DASH-templated name to used for the initialization segment", OFFSET(init_seg_name), AV_OPT_TYPE_STRING, {.str = "init-stream$RepresentationID$.m4s"}, 0, 0, E },
     { "media_seg_name", "DASH-templated name to used for the media segments", OFFSET(media_seg_name), AV_OPT_TYPE_STRING, {.str = "chunk-stream$RepresentationID$-$Number%05d$.m4s"}, 0, 0, E },
+    { "frag_discont", "discontinuous fragment mode", OFFSET(frag_discont), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, E },
     { NULL },
 };
 
