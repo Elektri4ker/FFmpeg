@@ -58,8 +58,10 @@ static int read_timefile (char *dir, int64_t *start_pts, int *seq_num, AVRationa
     char path[1024], start_time_path[1024];
     snprintf(path, sizeof(path), "%stimefile", dir);
     snprintf(start_time_path, sizeof(path), "%sstart_time", dir);
-    FILE *f = fopen (path, "r");
-    FILE *sf = fopen (start_time_path, "r");
+    FILE *f = NULL;
+    FILE *sf = NULL;
+    f = fopen (path, "r");
+    sf = fopen (start_time_path, "r");
     //Если таких файлов нет, значит и ffmpeg внезапно не останавливался
     //или вообще мы пишем не туда.
     //Посему ничего в этом случае мы не делаем
@@ -82,11 +84,11 @@ static int read_timefile (char *dir, int64_t *start_pts, int *seq_num, AVRationa
     
     if (saved_time > curr_time) {
         av_log (0, AV_LOG_WARNING, "Trying to continue dash stream: but saved time > current time!\n");
-        goto fail;
+        //goto fail;
     }
     if (_end_pts > _start_pts/1000000*time_base.den) {
         av_log (0, AV_LOG_WARNING, "Trying to continue dash stream: but end_pts of previous segment > current start pts!\n");
-        goto fail;
+        //goto fail;
     }   
     *start_pts = _start_pts; //fprintf(stderr, "start_pts %f s", (float)_start_pts/1000000);
     *seq_num = calc_seq_num;
@@ -95,8 +97,10 @@ static int read_timefile (char *dir, int64_t *start_pts, int *seq_num, AVRationa
     fclose(sf);
     return 0;
 fail:
-    fclose(f);
-    fclose(sf);
+    if (f)
+        fclose(f);
+    if (sf)
+        fclose(sf);
     return -1;   
 }
 //==================================
@@ -160,6 +164,7 @@ typedef struct DASHContext {
     AVRational min_frame_rate, max_frame_rate;
     int ambiguous_frame_rate;
     int frag_discont;
+    char *mov_options_str;
 } DASHContext;
 
 static int dash_write(void *opaque, uint8_t *buf, int buf_size)
@@ -659,6 +664,16 @@ static int dash_write_header(AVFormatContext *s)
         AVStream *st;
         AVDictionary *opts = NULL;
         char filename[1024];
+        int b_restore = 0;
+
+        //====================================================
+        int64_t ts_off = 0; int segment_index = 1;
+
+        if (read_timefile(c->dirname, &ts_off, &segment_index,
+                s->streams[i]->time_base,
+                c->min_seg_duration)==0)
+            b_restore = 1;
+        //====================================================
 
         os->bit_rate = s->streams[i]->codec->bit_rate ?
                        s->streams[i]->codec->bit_rate :
@@ -722,6 +737,19 @@ static int dash_write_header(AVFormatContext *s)
         if (c->frag_discont)
             strcat(s_mov_flags, "+frag_discont");
         av_dict_set(&opts, "movflags", s_mov_flags, 0);
+        if (b_restore && segment_index != 1) {
+            char s_segment_index[64];
+            sprintf(s_segment_index, "%d", segment_index);
+            av_dict_set(&opts, "fragment_index", s_segment_index, 0);
+        }
+        if (c->mov_options_str) {
+            ret = av_dict_parse_string(&opts, c->mov_options_str, "=", ":", 0);
+            if (ret < 0) {
+                av_log(s, AV_LOG_ERROR, "Could not parse mov format options list '%s'\n",
+                       c->mov_options_str);
+                goto fail;
+            }
+        }
         if ((ret = avformat_write_header(ctx, &opts)) < 0) {
              goto fail;
         }
@@ -759,10 +787,10 @@ static int dash_write_header(AVFormatContext *s)
         
             
         //==========================================
-        if (read_timefile(c->dirname, &(s->output_ts_offset), &(os->segment_index),
-                s->streams[i]->time_base,
-                c->min_seg_duration)==0) {
-            
+
+        if (b_restore) {
+            s->output_ts_offset = ts_off;
+            os->segment_index = segment_index;
         }
         segment_start_index = os->segment_index;
         //==========================================
@@ -1093,6 +1121,7 @@ static const AVOption options[] = {
     { "init_seg_name", "DASH-templated name to used for the initialization segment", OFFSET(init_seg_name), AV_OPT_TYPE_STRING, {.str = "init-stream$RepresentationID$.m4s"}, 0, 0, E },
     { "media_seg_name", "DASH-templated name to used for the media segments", OFFSET(media_seg_name), AV_OPT_TYPE_STRING, {.str = "chunk-stream$RepresentationID$-$Number%05d$.m4s"}, 0, 0, E },
     { "frag_discont", "discontinuous fragment mode", OFFSET(frag_discont), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, E },
+    { "mov_options", "set list of options for the mov container format used for the segments", OFFSET(mov_options_str), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, E },
     { NULL },
 };
 
