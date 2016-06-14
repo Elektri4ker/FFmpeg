@@ -2188,13 +2188,21 @@ redo:
                 }
             }
             if (ret == -RTCP_BYE) {
-                rt->nb_byes++;
+		av_log(s, AV_LOG_WARNING, "Received BYE for stream %d - IGNORING IT\n", rtsp_st->stream_index);
+		/*
+		if (rtsp_st->stream_index < 0)
+			av_log(s, AV_LOG_WARNING, "Received BYE for invalid stream %d\n", rtsp_st->stream_index);
+		else
+		{
+			rt->nb_byes++;
 
-                av_log(s, AV_LOG_DEBUG, "Received BYE for stream %d (%d/%d)\n",
-                       rtsp_st->stream_index, rt->nb_byes, rt->nb_rtsp_streams);
+			av_log(s, AV_LOG_DEBUG, "Received BYE for stream %d (%d/%d)\n",
+			       rtsp_st->stream_index, rt->nb_byes, rt->nb_rtsp_streams);
 
-                if (rt->nb_byes == rt->nb_rtsp_streams)
-                    return AVERROR_EOF;
+			if (rt->nb_byes == rt->nb_rtsp_streams)
+			    return AVERROR_EOF;
+		}
+		*/
             }
         }
     } else if (CONFIG_RTPDEC && rt->ts) {
